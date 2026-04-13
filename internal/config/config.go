@@ -1,6 +1,8 @@
+// Package config loads the zellij-tui TOML configuration file.
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -10,6 +12,9 @@ import (
 // Config holds all user-configurable settings.
 type Config struct {
 	// Path to the zellij binary. If empty, uses PATH lookup.
+	// SECURITY: this path is passed directly to exec.Command/syscall.Exec
+	// with full user privileges. Only set this if you control the target
+	// binary and the config file's write permissions.
 	ZellijPath string `toml:"zellij_path"`
 
 	// AutoAttach controls what happens after creating a new session.
@@ -26,8 +31,8 @@ func DefaultConfig() *Config {
 }
 
 // Load reads config from the default locations:
-//  1. ~/.config/zellij-tui/config.toml
-//  2. $XDG_CONFIG_HOME/zellij-tui/config.toml
+//  1. $XDG_CONFIG_HOME/zellij-tui/config.toml
+//  2. ~/.config/zellij-tui/config.toml
 //
 // Returns default config if no file is found.
 func Load() *Config {
@@ -43,7 +48,9 @@ func Load() *Config {
 		return cfg
 	}
 
-	_ = toml.Unmarshal(data, cfg)
+	if err := toml.Unmarshal(data, cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: config parse error in %s: %v\n", path, err)
+	}
 	return cfg
 }
 

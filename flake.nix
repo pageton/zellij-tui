@@ -36,6 +36,10 @@
             gopls
             gotools
             zellij
+            golangci-lint
+            staticcheck
+            goimports-tools
+            just
           ];
 
           shellHook = ''

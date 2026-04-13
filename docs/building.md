@@ -27,17 +27,48 @@ Or use your system's package manager if it provides Go 1.25+.
 ## Clone
 
 ```bash
-git clone https://github.com/sadiq/zellij-tui.git
+git clone https://github.com/pageton/zellij-tui.git
 cd zellij-tui
 ```
 
 ## Build
 
+### Using just (recommended)
+
+If you have [just](https://github.com/casey/just) installed:
+
+```bash
+just build
+```
+
+This produces an optimized static binary (stripped, CGO disabled) named `zellij-tui`.
+
+Common recipes:
+
+```bash
+just build       # optimized static binary
+just test        # run all tests
+just test-fast   # run only zellij package tests (fast iteration)
+just check       # vet + full test suite
+just clean       # remove build artifacts
+just size        # build and show binary size
+```
+
+Run `just --list` to see all available recipes.
+
+### Using go directly
+
 ```bash
 go build -o zellij-tui .
 ```
 
-This produces a single static binary named `zellij-tui` in the current directory.
+This produces a binary named `zellij-tui` in the current directory.
+
+For an optimized build matching the justfile defaults:
+
+```bash
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o zellij-tui .
+```
 
 ### Cross-compilation
 
@@ -85,7 +116,15 @@ Make sure `$GOPATH/bin` or the install target is in your `PATH`.
 ## Run tests
 
 ```bash
+# All tests
 go test ./...
+
+# Fast iteration (only zellij package)
+go test ./internal/zellij/ -count=1 -v
+
+# Or with just
+just test
+just test-fast
 ```
 
 Only the `internal/zellij` package has tests currently (session output parsing).
@@ -120,12 +159,14 @@ go mod tidy
 
 Key runtime dependencies (imported by the project):
 
-| Package                     | Purpose                    |
-|-----------------------------|----------------------------|
-| `charm.land/bubbletea/v2`  | TUI framework              |
-| `charm.land/bubbles/v2`    | Text input component       |
-| `charm.land/lipgloss/v2`   | Terminal styling/layout    |
-| `github.com/pelletier/go-toml/v2` | Config file parsing  |
+| Package                              | Purpose                    |
+|--------------------------------------|----------------------------|
+| `charm.land/bubbletea/v2`            | TUI framework              |
+| `charm.land/bubbles/v2`              | Text input component       |
+| `charm.land/lipgloss/v2`             | Terminal styling/layout    |
+| `github.com/charmbracelet/ultraviolet` | Key matching utilities   |
+| `github.com/clipperhouse/displaywidth`  | Unicode-aware string width |
+| `github.com/pelletier/go-toml/v2`    | Config file parsing        |
 
 ## Troubleshooting
 

@@ -14,41 +14,57 @@ Browse, create, attach, delete, and kill Zellij sessions from a single keyboard-
 - **Auto-attach** — creating a session immediately attaches (configurable)
 - **Works inside sessions** — shows a warning banner; prevents attaching to the current session
 - **No wrapper layer** — uses `syscall.Exec` so zellij replaces the process directly
-
-## Requirements
-
-- [Go](https://go.dev) 1.25+
-- [Zellij](https://zellij.dev) installed and in `PATH`
+- **Full Nix support** — flake, dev shell, Home Manager module, overlay
 
 ## Install
 
+### Nix (recommended)
+
 ```bash
-go install github.com/sadiq/zellij-tui@latest
+# Run without installing
+nix run github:pageton/zellij-tui
+
+# Install to your profile
+nix profile install github:pageton/zellij-tui
+```
+
+For declarative config via Home Manager, see [Nix setup](docs/nix.md).
+
+### go install
+
+```bash
+go install github.com/pageton/zellij-tui@latest
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/pageton/zellij-tui.git
+cd zellij-tui
+just build
+```
+
+Or without [just](https://github.com/casey/just):
+
+```bash
+go build -o zellij-tui .
 ```
 
 ## Usage
-
-Run the binary directly:
 
 ```bash
 zellij-tui
 ```
 
-Or use the shell helper for a shorter command — add this to your `.bashrc` / `.zshrc`:
+Or use the shell helper — add to `.bashrc` / `.zshrc`:
 
 ```bash
 source /path/to/zellij-tui/shell/zt.sh
 ```
 
-Then run:
-
-```bash
-zt
-```
+Then run `zt`.
 
 ### Auto-launch on terminal open
-
-To start the session manager every time you open a terminal (when not already in a Zellij session):
 
 ```bash
 if [[ -z "$ZELLIJ" ]] && [[ $- == *i* ]]; then
@@ -86,20 +102,33 @@ zellij_path = "/usr/bin/zellij"
 auto_attach = true
 ```
 
+### Nix (Home Manager)
+
+```nix
+programs.zellij-tui = {
+  enable = true;
+  settings = {
+    zellij_path = "${pkgs.zellij}/bin/zellij";
+    auto_attach = true;
+  };
+};
+```
+
+Generates the config file and adds `zellij-tui` to your PATH. See the [full Nix docs](docs/nix.md) for setup.
+
 ## How it works
 
 1. Launches a Bubble Tea TUI rendered to `/dev/tty` (works even when stdout is piped)
 2. Calls `zellij list-sessions --no-formatting` to populate the session list
 3. On exit, uses `syscall.Exec` to replace the process with the selected `zellij attach` command — no shell wrapper overhead
 
-## Build from source
+## Documentation
 
-```bash
-git clone https://github.com/sadiq/zellij-tui.git
-cd zellij-tui
-go build -o zellij-tui .
-```
+- [Keybindings](docs/keybindings.md) — full key reference for all modes
+- [Building from source](docs/building.md) — prerequisites, build flags, cross-compilation, troubleshooting
+- [Configuration](docs/configuration.md) — config file location, options, defaults
+- [Nix setup](docs/nix.md) — flakes, Home Manager module, overlay, direnv
 
 ## License
 
-MIT
+[MIT](LICENSE)

@@ -1,10 +1,13 @@
 package zellij
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/pageton/zellij-tui/internal/session"
 )
 
-	func TestSessionLineRe(t *testing.T) {
+func TestSessionLineRe(t *testing.T) {
 	tests := []struct {
 		line        string
 		name        string
@@ -73,6 +76,41 @@ import (
 			gotCurrent := matches[3] != ""
 			if gotCurrent != tt.isCurrent {
 				t.Errorf("isCurrent: got %v, want %v", gotCurrent, tt.isCurrent)
+			}
+		})
+	}
+}
+
+func TestParseSessionsRejectsInvalidNames(t *testing.T) {
+	tests := []struct {
+		name      string
+		line      string
+		wantValid bool
+	}{
+		{"valid name", "my-session [Created 5s ago]", true},
+		{"leading hyphen", "--help [Created 5s ago]", false},
+		{"spaces in name", "bad session [Created 5s ago]", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the parse+validate pipeline from ListSessions
+			for _, line := range strings.Split(tt.line, "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				matches := sessionLineRe.FindStringSubmatch(line)
+				if matches == nil {
+					if tt.wantValid {
+						t.Errorf("regex should match %q", line)
+					}
+					continue
+				}
+				valid := session.ValidSessionName(matches[1])
+				if valid != tt.wantValid {
+					t.Errorf("ValidSessionName(%q) = %v, want %v", matches[1], valid, tt.wantValid)
+				}
 			}
 		})
 	}

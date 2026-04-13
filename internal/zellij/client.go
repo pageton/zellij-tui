@@ -1,3 +1,4 @@
+// Package zellij wraps the zellij binary for session management.
 package zellij
 
 import (
@@ -5,15 +6,15 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
-	"syscall"
 
-	"github.com/sadiq/zellij-tui/internal/types"
+	"github.com/pageton/zellij-tui/internal/session"
 )
 
 // sessionLineRe matches lines like:
-//   main [Created 1day 21h 5m 55s ago] (current)
-//   work [Created 3h 12m ago]
-//   hello [Created 10m ago] (EXITED - attach to resurrect)
+//
+//	main [Created 1day 21h 5m 55s ago] (current)
+//	work [Created 3h 12m ago]
+//	hello [Created 10m ago] (EXITED - attach to resurrect)
 var sessionLineRe = regexp.MustCompile(`^(\S+)\s+\[Created\s+(.+?)\s+ago\](?:\s+\(EXITED[^)]*\))?(\s+\(current\))?$`)
 
 // binary is the path to the zellij executable.
@@ -26,7 +27,7 @@ func SetBinary(path string) {
 
 // ListSessions runs `zellij list-sessions --no-formatting` and parses the output.
 // Returns an empty slice (no error) if there are no sessions.
-func ListSessions() ([]types.Session, error) {
+func ListSessions() ([]session.Session, error) {
 	cmd := exec.Command(binary, "list-sessions", "--no-formatting")
 	out, err := cmd.Output()
 	if err != nil {
@@ -36,7 +37,7 @@ func ListSessions() ([]types.Session, error) {
 		return nil, err
 	}
 
-	var sessions []types.Session
+	var sessions []session.Session
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -46,8 +47,12 @@ func ListSessions() ([]types.Session, error) {
 		if matches == nil {
 			continue
 		}
-		sessions = append(sessions, types.Session{
-			Name:      matches[1],
+		name := matches[1]
+		if !session.ValidSessionName(name) {
+			continue
+		}
+		sessions = append(sessions, session.Session{
+			Name:      name,
 			Created:   matches[2],
 			IsCurrent: matches[3] != "",
 			Exited:    strings.Contains(line, "(EXITED"),
@@ -62,17 +67,11 @@ func DeleteSession(name string) error {
 	return exec.Command(binary, "delete-session", "-f", name).Run()
 }
 
-// CreateSession creates a new session fully detached from this process.
-// It spawns zellij in a new session group so it survives terminal close.
+// CreateSession creates a new detached session in the background.
+// Uses zellij's --create-background flag which creates the session on the
+// server and exits immediately, keeping the session alive independently.
 func CreateSession(name string) error {
-	cmd := exec.Command(binary, "attach", "-b", "-c", name)
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
-	return cmd.Start()
+	return exec.Command(binary, "attach", "-b", name).Run()
 }
 
 // KillSession kills a running session by name (without deleting).

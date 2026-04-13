@@ -77,3 +77,21 @@ If you skip the config file entirely, the defaults are:
 - Unknown keys in the config file are silently ignored (no error).
 - If the config file contains invalid TOML, defaults are used.
 - If `zellij_path` points to a non-existent binary, zellij-tui exits with an error at startup.
+
+## Zellij compatibility
+
+zellij-tui requires that zellij's `on_force_close` is set to `"detach"` (not `"quit"`).
+
+When set to `"quit"`, closing the terminal while attached to a session kills the zellij server process and destroys the session. With `"detach"`, the server survives and the session can be re-attached from zellij-tui or `zellij attach`.
+
+Check your zellij config (`~/.config/zellij/config.kdl` or Home Manager):
+
+```kdl
+// kdl config
+on_force_close "detach"
+```
+
+```nix
+# Home Manager
+programs.zellij.settings.on_force_close = "detach";
+```

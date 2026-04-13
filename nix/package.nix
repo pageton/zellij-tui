@@ -16,16 +16,22 @@ buildGoModule {
     ];
   };
 
-  vendorHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  vendorHash = "sha256-8bHyUrxqNDt6kFwavQLcX3kKOIekea6qQAWSD1KXhfo=";
+
+  proxyVendor = true;
+
+  env.CGO_ENABLED = 0;
+  env.GOAMD64 = "v3";
 
   ldflags = [
     "-s"
     "-w"
+    "-X main.version=0.1.0"
   ];
 
   meta = {
     description = "TUI session manager for Zellij";
-    homepage = "https://github.com/sadiq/zellij-tui";
+    homepage = "https://github.com/pageton/zellij-tui";
     license = lib.licenses.mit;
     mainProgram = "zellij-tui";
   };

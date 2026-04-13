@@ -1,4 +1,4 @@
-module github.com/sadiq/zellij-tui
+module github.com/pageton/zellij-tui
 
 go 1.25.7
 

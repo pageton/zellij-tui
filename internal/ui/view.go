@@ -5,21 +5,16 @@ import (
 	"strings"
 
 	"github.com/clipperhouse/displaywidth"
-)
 
-// SessionData is a view-local representation of a session.
-type SessionData struct {
-	Name      string
-	Created   string
-	IsCurrent bool
-	Exited    bool
-}
+	"github.com/pageton/zellij-tui/internal/session"
+)
 
 // State represents the current UI mode.
 type State int
 
+// State values represent the current UI mode.
 const (
-	StateList          State = iota
+	StateList State = iota
 	StateInput
 	StateConfirmDelete
 	StateConfirmKill
@@ -31,15 +26,25 @@ const cardWidth = 68
 const cardMinHeight = 12
 const cardMaxHeight = 24
 
+// ViewData carries all model state needed by the renderer.
+type ViewData struct {
+	Sessions      []session.Session
+	Cursor        int
+	State         State
+	InputView     string
+	ErrMsg        string
+	QuitPending   bool
+	InsideSession bool
+	TermWidth     int
+}
+
 // Render builds the full view string from the model state.
-func Render(sessions []SessionData, cursor int, state State,
-	inputView string, errMsg string, quitPending bool, insideSession bool,
-	termWidth int) string {
+func Render(d ViewData) string {
 
 	var b strings.Builder
 
 	// Warning banner when already inside a session
-	if insideSession {
+	if d.InsideSession {
 		b.WriteString(WarningStyle.Render("⚠ Already inside a Zellij session"))
 		b.WriteString("\n\n")
 	}
@@ -49,37 +54,37 @@ func Render(sessions []SessionData, cursor int, state State,
 	b.WriteString("\n\n")
 
 	// Session list or empty state
-	if len(sessions) == 0 {
+	if len(d.Sessions) == 0 {
 		renderEmpty(&b)
 	} else {
-		renderSessionList(&b, sessions, cursor)
+		renderSessionList(&b, d.Sessions, d.Cursor)
 	}
 
 	// Overlays
-	switch state {
+	switch d.State {
 	case StateInput:
 		b.WriteString("\n")
-		b.WriteString(inputView)
+		b.WriteString(d.InputView)
 		b.WriteString("\n")
 		b.WriteString(StatusBarStyle.Render(fmt.Sprintf(
 			"%s create · %s cancel", FmtKey("enter"), FmtKey("esc"),
 		)))
 
 	case StateConfirmDelete:
-		if cursor >= 0 && cursor < len(sessions) {
+		if d.Cursor >= 0 && d.Cursor < len(d.Sessions) {
 			b.WriteString("\n")
 			b.WriteString(ConfirmPromptStyle.Render(fmt.Sprintf(
 				"Delete %q? %s/%s",
-				sessions[cursor].Name, FmtKey("y"), FmtKey("n"),
+				d.Sessions[d.Cursor].Name, FmtKey("y"), FmtKey("n"),
 			)))
 		}
 
 	case StateConfirmKill:
-		if cursor >= 0 && cursor < len(sessions) {
+		if d.Cursor >= 0 && d.Cursor < len(d.Sessions) {
 			b.WriteString("\n")
 			b.WriteString(ConfirmPromptStyle.Render(fmt.Sprintf(
 				"Kill %q? %s/%s",
-				sessions[cursor].Name, FmtKey("y"), FmtKey("n"),
+				d.Sessions[d.Cursor].Name, FmtKey("y"), FmtKey("n"),
 			)))
 		}
 
@@ -90,18 +95,18 @@ func Render(sessions []SessionData, cursor int, state State,
 		)))
 
 	case StateList:
-		if errMsg != "" {
+		if d.ErrMsg != "" {
 			b.WriteString("\n")
-			b.WriteString(ErrorStyle.Render(errMsg))
+			b.WriteString(ErrorStyle.Render(d.ErrMsg))
 		}
-		if quitPending {
+		if d.QuitPending {
 			b.WriteString("\n")
 			b.WriteString(QuitHintStyle.Render("Press q again to quit"))
 		}
 	}
 
 	// Status bar — always show except in input mode
-	if state != StateInput {
+	if d.State != StateInput {
 		b.WriteString("\n")
 		b.WriteString(SeparatorStyle.Render(strings.Repeat("─", cardWidth-10)))
 		b.WriteString("\n")
@@ -113,8 +118,8 @@ func Render(sessions []SessionData, cursor int, state State,
 	// Adaptive height: grows with content, min 12, max 24
 	h := cardMinHeight
 	// Rough estimate: title(3) + sessions(N) + overlays(2) + separator(2) + status(1) + padding(4)
-	needed := 12 + len(sessions)
-	if state == StateInput {
+	needed := 12 + len(d.Sessions)
+	if d.State == StateInput {
 		needed += 3
 	}
 	if needed > h {
@@ -130,11 +135,11 @@ func Render(sessions []SessionData, cursor int, state State,
 func renderEmpty(b *strings.Builder) {
 	b.WriteString(EmptyMessageStyle.Render("No active sessions found."))
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("Press %s to create a new session.", FmtKey("n")))
+	fmt.Fprintf(b, "Press %s to create a new session.", FmtKey("n"))
 	b.WriteString("\n")
 }
 
-func renderSessionList(b *strings.Builder, sessions []SessionData, cursor int) {
+func renderSessionList(b *strings.Builder, sessions []session.Session, cursor int) {
 	maxName := 0
 	for _, s := range sessions {
 		w := displaywidth.String(s.Name)

@@ -1,3 +1,4 @@
+// Package ui provides styles and rendering for the zellij-tui interface.
 package ui
 
 import (

@@ -17,7 +17,7 @@ in {
     package = mkOption {
       type = types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-      defaultText = literalExpression "self.packstances.\${system}.default";
+      defaultText = literalExpression "self.packages.\${system}.default";
       description = "The zellij-tui package to use.";
     };
 

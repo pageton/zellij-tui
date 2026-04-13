@@ -1,25 +1,39 @@
+// Package model implements the Bubble Tea TUI model for session management.
 package model
 
 import (
 	"fmt"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 
-	"github.com/sadiq/zellij-tui/internal/keymap"
-	"github.com/sadiq/zellij-tui/internal/types"
-	"github.com/sadiq/zellij-tui/internal/ui"
-	"github.com/sadiq/zellij-tui/internal/zellij"
+	"github.com/pageton/zellij-tui/internal/keymap"
+	"github.com/pageton/zellij-tui/internal/session"
+	"github.com/pageton/zellij-tui/internal/ui"
+	"github.com/pageton/zellij-tui/internal/zellij"
 )
 
 const quitTimeout = 2 * time.Second
 
-// matchKey checks if a tea.KeyPressMsg matches any of the given key patterns.
-func matchKey(key tea.KeyPressMsg, patterns []string) bool {
-	return uv.Key(key.Key()).MatchString(patterns...)
+// refreshSessions returns a command that fetches the current session list.
+func refreshSessions() tea.Cmd {
+	return func() tea.Msg {
+		sessions, err := zellij.ListSessions()
+		return sessionsLoadedMsg{sessions: sessions, err: err}
+	}
+}
+
+// resetStatus clears transient UI state (quit pending flag and error message).
+func (m *TUI) resetStatus() {
+	m.quitPending = false
+	m.err = ""
+}
+
+// cursorValid returns true if the cursor points to an existing session.
+func (m *TUI) cursorValid() bool {
+	return len(m.sessions) > 0 && m.cursor >= 0 && m.cursor < len(m.sessions)
 }
 
 // tickMsg is sent when the quit timer expires.
@@ -27,7 +41,7 @@ type tickMsg time.Time
 
 // sessionsLoadedMsg is sent when session listing completes.
 type sessionsLoadedMsg struct {
-	sessions []types.Session
+	sessions []session.Session
 	err      error
 }
 
@@ -45,7 +59,7 @@ type createBackgroundResultMsg struct {
 // TUI is the Bubble Tea model for the session manager.
 type TUI struct {
 	state         ui.State
-	sessions      []types.Session
+	sessions      []session.Session
 	cursor        int
 	input         textinput.Model
 	err           string
@@ -55,6 +69,7 @@ type TUI struct {
 	width         int
 	height        int
 	result        Action
+	confirmAction func() tea.Cmd // stored action to run on confirm
 }
 
 // New creates a new TUI model.
@@ -71,16 +86,15 @@ func New() *TUI {
 	}
 }
 
+// Init returns the initial Bubble Tea commands.
 func (m *TUI) Init() tea.Cmd {
 	return tea.Batch(
-		func() tea.Msg {
-			sessions, err := zellij.ListSessions()
-			return sessionsLoadedMsg{sessions: sessions, err: err}
-		},
+		refreshSessions(),
 		tea.RequestWindowSize,
 	)
 }
 
+// Update handles Bubble Tea messages and returns the updated model.
 func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -106,26 +120,20 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case deleteResultMsg:
 		if msg.err != nil {
 			m.err = fmt.Sprintf("Failed to delete session: %v", msg.err)
-		} else {
-			m.err = ""
-			return m, func() tea.Msg {
-				sessions, err := zellij.ListSessions()
-				return sessionsLoadedMsg{sessions: sessions, err: err}
-			}
+			return m, nil
 		}
-		return m, nil
+		m.err = ""
+		return m, refreshSessions()
 
 	case createBackgroundResultMsg:
 		if msg.err != nil {
 			m.err = fmt.Sprintf("Failed to create session: %v", msg.err)
-		} else {
-			m.err = ""
-			return m, func() tea.Msg {
-				sessions, err := zellij.ListSessions()
-				return sessionsLoadedMsg{sessions: sessions, err: err}
-			}
+			return m, nil
 		}
-		return m, nil
+		m.err = ""
+		return m, tea.Tick(500*time.Millisecond, func(_ time.Time) tea.Msg {
+			return refreshSessions()()
+		})
 
 	case tickMsg:
 		if m.quitPending {
@@ -139,12 +147,8 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateList(msg)
 	case ui.StateInput:
 		return m.updateInput(msg)
-	case ui.StateConfirmDelete:
-		return m.updateConfirmDelete(msg)
-	case ui.StateConfirmKill:
-		return m.updateConfirmKill(msg)
-	case ui.StateConfirmDeleteAll:
-		return m.updateConfirmDeleteAll(msg)
+	case ui.StateConfirmDelete, ui.StateConfirmKill, ui.StateConfirmDeleteAll:
+		return m.updateConfirm(msg)
 	}
 
 	return m, nil
@@ -157,27 +161,24 @@ func (m *TUI) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
-	case matchKey(key, keymap.Up):
+	case keymap.Up.Match(key):
 		if m.cursor > 0 {
 			m.cursor--
 		}
-		m.quitPending = false
-		m.err = ""
+		m.resetStatus()
 		return m, nil
 
-	case matchKey(key, keymap.Down):
+	case keymap.Down.Match(key):
 		if m.cursor < len(m.sessions)-1 {
 			m.cursor++
 		}
-		m.quitPending = false
-		m.err = ""
+		m.resetStatus()
 		return m, nil
 
-	case matchKey(key, keymap.Enter):
-		if len(m.sessions) == 0 || m.cursor < 0 || m.cursor >= len(m.sessions) {
+	case keymap.Enter.Match(key):
+		if !m.cursorValid() {
 			return m, nil
 		}
-		// Prevent attaching to the current session — zellij crashes
 		if m.sessions[m.cursor].IsCurrent {
 			m.err = "Already in this session"
 			return m, nil
@@ -185,50 +186,62 @@ func (m *TUI) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result = Action{Op: ActionAttach, Name: m.sessions[m.cursor].Name}
 		return m, tea.Quit
 
-	case matchKey(key, keymap.NewSession):
+	case keymap.NewSession.Match(key):
 		m.state = ui.StateInput
 		m.input.SetValue("")
 		cmd := m.input.Focus()
-		m.quitPending = false
-		m.err = ""
+		m.resetStatus()
 		return m, cmd
 
-	case matchKey(key, keymap.Delete):
-		if len(m.sessions) == 0 || m.cursor < 0 || m.cursor >= len(m.sessions) {
+	case keymap.Delete.Match(key):
+		if !m.cursorValid() {
 			return m, nil
+		}
+		name := m.sessions[m.cursor].Name
+		m.confirmAction = func() tea.Cmd {
+			return func() tea.Msg {
+				err := zellij.DeleteSession(name)
+				return deleteResultMsg{err: err}
+			}
 		}
 		m.state = ui.StateConfirmDelete
-		m.quitPending = false
-		m.err = ""
+		m.resetStatus()
 		return m, nil
 
-	case matchKey(key, keymap.Kill):
-		if len(m.sessions) == 0 || m.cursor < 0 || m.cursor >= len(m.sessions) {
+	case keymap.Kill.Match(key):
+		if !m.cursorValid() {
 			return m, nil
 		}
+		name := m.sessions[m.cursor].Name
+		m.confirmAction = func() tea.Cmd {
+			return func() tea.Msg {
+				err := zellij.KillSession(name)
+				return deleteResultMsg{err: err}
+			}
+		}
 		m.state = ui.StateConfirmKill
-		m.quitPending = false
-		m.err = ""
+		m.resetStatus()
 		return m, nil
 
-	case matchKey(key, keymap.DeleteAll):
+	case keymap.DeleteAll.Match(key):
 		if len(m.sessions) == 0 {
 			return m, nil
 		}
+		m.confirmAction = func() tea.Cmd {
+			return func() tea.Msg {
+				err := zellij.DeleteAllSessions()
+				return deleteResultMsg{err: err}
+			}
+		}
 		m.state = ui.StateConfirmDeleteAll
-		m.quitPending = false
-		m.err = ""
+		m.resetStatus()
 		return m, nil
 
-	case matchKey(key, keymap.Refresh):
-		m.quitPending = false
-		m.err = ""
-		return m, func() tea.Msg {
-			sessions, err := zellij.ListSessions()
-			return sessionsLoadedMsg{sessions: sessions, err: err}
-		}
+	case keymap.Refresh.Match(key):
+		m.resetStatus()
+		return m, refreshSessions()
 
-	case matchKey(key, keymap.Quit):
+	case keymap.Quit.Match(key):
 		if m.quitPending {
 			m.result = Action{Op: ActionNone}
 			return m, tea.Quit
@@ -238,14 +251,12 @@ func (m *TUI) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return tickMsg(t)
 		})
 
-	case matchKey(key, keymap.CtrlC):
+	case keymap.CtrlC.Match(key):
 		m.result = Action{Op: ActionNone}
 		return m, tea.Quit
 
 	default:
-		if m.quitPending {
-			m.quitPending = false
-		}
+		m.quitPending = false
 	}
 
 	return m, nil
@@ -254,14 +265,18 @@ func (m *TUI) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *TUI) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch {
-		case matchKey(key, keymap.Escape):
+		case keymap.Escape.Match(key):
 			m.state = ui.StateList
 			m.input.Blur()
 			return m, nil
 
-		case matchKey(key, keymap.Enter):
+		case keymap.Enter.Match(key):
 			name := m.input.Value()
 			if name == "" {
+				return m, nil
+			}
+			if !session.ValidSessionName(name) {
+				m.err = "Invalid name: use letters, numbers, _ . - (no leading -)"
 				return m, nil
 			}
 			if m.autoAttach {
@@ -283,103 +298,43 @@ func (m *TUI) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *TUI) updateConfirmDelete(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *TUI) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
 
 	switch {
-	case matchKey(key, keymap.ConfirmYes):
-		if m.cursor < 0 || m.cursor >= len(m.sessions) {
-			m.state = ui.StateList
+	case keymap.ConfirmYes.Match(key):
+		action := m.confirmAction
+		m.state = ui.StateList
+		m.confirmAction = nil
+		if action == nil {
 			return m, nil
 		}
-		name := m.sessions[m.cursor].Name
-		m.state = ui.StateList
-		return m, func() tea.Msg {
-			err := zellij.DeleteSession(name)
-			return deleteResultMsg{err: err}
-		}
+		return m, action()
 
-	case matchKey(key, keymap.ConfirmNo), matchKey(key, keymap.Escape):
+	case keymap.ConfirmNo.Match(key), keymap.Escape.Match(key):
 		m.state = ui.StateList
+		m.confirmAction = nil
 		return m, nil
 	}
 
 	return m, nil
 }
 
-func (m *TUI) updateConfirmKill(msg tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyPressMsg)
-	if !ok {
-		return m, nil
-	}
-
-	switch {
-	case matchKey(key, keymap.ConfirmYes):
-		if m.cursor < 0 || m.cursor >= len(m.sessions) {
-			m.state = ui.StateList
-			return m, nil
-		}
-		name := m.sessions[m.cursor].Name
-		m.state = ui.StateList
-		return m, func() tea.Msg {
-			err := zellij.KillSession(name)
-			return deleteResultMsg{err: err}
-		}
-
-	case matchKey(key, keymap.ConfirmNo), matchKey(key, keymap.Escape):
-		m.state = ui.StateList
-		return m, nil
-	}
-
-	return m, nil
-}
-
-func (m *TUI) updateConfirmDeleteAll(msg tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyPressMsg)
-	if !ok {
-		return m, nil
-	}
-
-	switch {
-	case matchKey(key, keymap.ConfirmYes):
-		m.state = ui.StateList
-		return m, func() tea.Msg {
-			err := zellij.DeleteAllSessions()
-			return deleteResultMsg{err: err}
-		}
-
-	case matchKey(key, keymap.ConfirmNo), matchKey(key, keymap.Escape):
-		m.state = ui.StateList
-		return m, nil
-	}
-
-	return m, nil
-}
-
+// View renders the current TUI state.
 func (m *TUI) View() tea.View {
-	uiSessions := make([]ui.SessionData, len(m.sessions))
-	for i, s := range m.sessions {
-		uiSessions[i] = ui.SessionData{
-			Name:      s.Name,
-			Created:   s.Created,
-			IsCurrent: s.IsCurrent,
-			Exited:    s.Exited,
-		}
-	}
-
-	content := ui.Render(
-		uiSessions,
-		m.cursor,
-		m.state,
-		m.input.View(),
-		m.err,
-		m.quitPending,
-		m.insideSession,
-		m.width,
-	)
+	content := ui.Render(ui.ViewData{
+		Sessions:      m.sessions,
+		Cursor:        m.cursor,
+		State:         m.state,
+		InputView:     m.input.View(),
+		ErrMsg:        m.err,
+		QuitPending:   m.quitPending,
+		InsideSession: m.insideSession,
+		TermWidth:     m.width,
+	})
 
 	// Center the content on screen
 	if m.width > 0 && m.height > 0 {

@@ -9,11 +9,11 @@ type Action struct {
 // ActionOp represents the type of action the user chose.
 type ActionOp int
 
+// ActionOp values represent the type of action the user chose.
 const (
-	ActionNone          ActionOp = iota
+	ActionNone   ActionOp = iota // no action
 	ActionAttach                 // attach to existing session
 	ActionCreate                 // create and attach
-	ActionCreateBackground       // create in background, stay in TUI
 )
 
 func (a Action) String() string {
