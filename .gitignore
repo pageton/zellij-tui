@@ -1,0 +1,8 @@
+# Binaries
+zellij-tui
+
+# Debug logs
+tea_debug.log
+
+# OS
+.DS_Store
