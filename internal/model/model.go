@@ -17,25 +17,6 @@ import (
 
 const quitTimeout = 2 * time.Second
 
-// refreshSessions returns a command that fetches the current session list.
-func refreshSessions() tea.Cmd {
-	return func() tea.Msg {
-		sessions, err := zellij.ListSessions()
-		return sessionsLoadedMsg{sessions: sessions, err: err}
-	}
-}
-
-// resetStatus clears transient UI state (quit pending flag and error message).
-func (m *TUI) resetStatus() {
-	m.quitPending = false
-	m.err = ""
-}
-
-// cursorValid returns true if the cursor points to an existing session.
-func (m *TUI) cursorValid() bool {
-	return len(m.sessions) > 0 && m.cursor >= 0 && m.cursor < len(m.sessions)
-}
-
 // tickMsg is sent when the quit timer expires.
 type tickMsg time.Time
 
@@ -84,6 +65,25 @@ func New() *TUI {
 		input:      ti,
 		autoAttach: true,
 	}
+}
+
+// refreshSessions returns a command that fetches the current session list.
+func refreshSessions() tea.Cmd {
+	return func() tea.Msg {
+		sessions, err := zellij.ListSessions()
+		return sessionsLoadedMsg{sessions: sessions, err: err}
+	}
+}
+
+// resetStatus clears transient UI state (quit pending flag and error message).
+func (m *TUI) resetStatus() {
+	m.quitPending = false
+	m.err = ""
+}
+
+// cursorValid returns true if the cursor points to an existing session.
+func (m *TUI) cursorValid() bool {
+	return len(m.sessions) > 0 && m.cursor >= 0 && m.cursor < len(m.sessions)
 }
 
 // Init returns the initial Bubble Tea commands.
